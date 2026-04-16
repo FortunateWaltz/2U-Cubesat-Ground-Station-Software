@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gökmen-M CubeSat | Yer Gözlem Platformu</title>
+  <meta name="description" content="NDVI ve LST sensör füzyonu ile orman yangını tahribatı, biyoçeşitlilik kaybı, kuraklık erken uyarı ve yangın yayılım tahmini yapan düşük maliyetli küp uydu platformu." />
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <!-- Leaflet.js -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Main CSS -->
+  <link rel="stylesheet" href="css/style.css?v=5" />
+</head>
+<body>
+
+  <!-- ============ LOADING SCREEN ============ -->
+  <div id="loading-screen" class="loading-screen">
+    <div class="loading-content">
+      <div class="loading-satellite">
+        <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="28" y="28" width="24" height="24" rx="4" fill="#00e5ff" opacity="0.95"/>
+          <rect x="4" y="34" width="20" height="12" rx="2" fill="#7c4dff" opacity="0.85"/>
+          <rect x="56" y="34" width="20" height="12" rx="2" fill="#7c4dff" opacity="0.85"/>
+          <line x1="24" y1="40" x2="4" y2="40" stroke="#00e5ff" stroke-width="2"/>
+          <line x1="56" y1="40" x2="76" y2="40" stroke="#00e5ff" stroke-width="2"/>
+          <circle cx="40" cy="40" r="6" fill="white" opacity="0.3"/>
+          <line x1="40" y1="10" x2="40" y2="24" stroke="#00e5ff" stroke-width="2" stroke-dasharray="3 3"/>
+          <circle cx="40" cy="8" r="4" fill="#ff6d00"/>
+          <animateTransform attributeName="transform" type="rotate" from="0 40 40" to="360 40 40" dur="8s" repeatCount="indefinite"/>
+        </svg>
+      </div>
+      <div class="loading-brand">Gökmen-M</div>
+      <div class="loading-sub">CubeSat Yer Gözlem Platformu Başlatılıyor...</div>
+      <div class="loading-bar"><div class="loading-fill"></div></div>
+    </div>
+  </div>
+
+  <!-- ============ MAP MODAL ============ -->
+  <div id="map-modal" class="map-modal" role="dialog" aria-modal="true" aria-label="Harita">
+    <div class="map-modal-inner">
+      <div class="map-modal-topbar">
+        <div class="map-title-badge" id="modal-region-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <span id="modal-label-text">Türkiye Orman Haritası</span>
+        </div>
+        <div class="map-layer-controls" id="modal-layer-controls">
+          <button class="layer-btn active" id="mlb-satellite" onclick="setMapType('satellite')" title="Uydu Görüntüsü">Uydu</button>
+          <button class="layer-btn" id="mlb-terrain" onclick="setMapType('terrain')" title="Arazi">Arazi</button>
+          <button class="layer-btn" id="mlb-roadmap" onclick="setMapType('roadmap')" title="Harita">Harita</button>
+        </div>
+        <button class="map-modal-close" id="map-modal-close-btn" onclick="closeMapModal()" title="Kapat" aria-label="Haritayı Kapat">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <!-- Biodiversity map -->
+      <div id="gmap" style="width:100%; height:100%;"></div>
+
+      <!-- Fire spread map -->
+      <div id="fire-gmap" style="width:100%; height:100%; display:none;"></div>
+
+      <!-- Drought map -->
+      <div id="drought-gmap" style="width:100%; height:100%; display:none;"></div>
+
+      <!-- Map Legend (bio map) -->
+      <div class="map-legend" id="modal-legend">
+        <div class="ml-title">Risk Seviyesi</div>
+        <div class="ml-row"><span class="ml-dot" style="background:#ff1744"></span> Kritik</div>
+        <div class="ml-row"><span class="ml-dot" style="background:#ff6d00"></span> Yüksek</div>
+        <div class="ml-row"><span class="ml-dot" style="background:#ffd740"></span> Orta</div>
+        <div class="ml-row"><span class="ml-dot" style="background:#00e676"></span> Düşük</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ HEADER ============ -->
+  <header id="main-header">
+    <div class="header-left">
+      <div class="satellite-icon" aria-hidden="true">
+        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="14" y="14" width="12" height="12" rx="2" fill="#00e5ff" opacity="0.9"/>
+          <rect x="2" y="17" width="10" height="6" rx="1" fill="#7c4dff" opacity="0.8"/>
+          <rect x="28" y="17" width="10" height="6" rx="1" fill="#7c4dff" opacity="0.8"/>
+          <line x1="12" y1="20" x2="2" y2="20" stroke="#00e5ff" stroke-width="1.5"/>
+          <line x1="28" y1="20" x2="38" y2="20" stroke="#00e5ff" stroke-width="1.5"/>
+          <circle cx="20" cy="20" r="3" fill="#fff" opacity="0.4"/>
+          <line x1="20" y1="6" x2="20" y2="12" stroke="#00e5ff" stroke-width="1.5" stroke-dasharray="2 2"/>
+          <circle cx="20" cy="5" r="2" fill="#ff6d00" opacity="0.9"/>
+        </svg>
+      </div>
+      <div class="brand">
+        <span class="brand-main">Gökmen-M</span>
+        <span class="brand-sub">CubeSat · Yer Gözlem Platformu</span>
+      </div>
+    </div>
+    <div class="header-center">
+      <div class="status-pill">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>CANLI · Uydu Bağlantısı Aktif</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="sensor-badges">
+        <span class="badge badge-ndvi" title="Normalized Difference Vegetation Index">NDVI</span>
+        <span class="badge badge-lst" title="Land Surface Temperature">LST</span>
+        <span class="badge badge-rgb">RGB</span>
+      </div>
+      <div class="time-display" id="live-time">00:00:00 UTC</div>
+    </div>
+  </header>
+
+  <!-- ============ MODULE NAV ============ -->
+  <nav class="module-nav" role="navigation" aria-label="Modül Seçimi">
+    <button class="module-btn active" id="btn-fauna" onclick="switchModule('fauna')" aria-pressed="true">
+      <span class="module-label">BIODIVERSITY</span>
+      <span class="module-sub">Biyoçeşitlilik Analizi</span>
+    </button>
+    <button class="module-btn" id="btn-flora" onclick="switchModule('flora')" aria-pressed="false">
+      <span class="module-label">FLORA + FAUNA</span>
+      <span class="module-sub">Tür &amp; Bitki Örtüsü</span>
+    </button>
+    <button class="module-btn" id="btn-fire" onclick="switchModule('fire')" aria-pressed="false">
+      <span class="module-label">YANGIN YAYILIMI</span>
+      <span class="module-sub">Rüzgar / Nem Analizi</span>
+    </button>
+    <button class="module-btn" id="btn-drought" onclick="switchModule('drought')" aria-pressed="false">
+      <span class="module-label">KURAKLIK UYARISI</span>
+      <span class="module-sub">NDVI Erken Uyarı</span>
+    </button>
+  </nav>
+
+  <!-- ============ MAIN ============ -->
+  <main id="app-main">
+
+    <!-- ======== BIODIVERSITY MODULE ======== -->
+    <section id="module-fauna" class="module active">
+      <div class="module-layout-nomap">
+
+        <!-- LEFT: Forest List -->
+        <aside class="left-panel" id="forest-panel">
+          <div class="panel-header">
+            <h2 class="panel-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 8C8 10 5.9 16.17 3.82 21.34"/><path d="M11.63 12.27C6.18 14.54 4.43 19.1 3.96 21"/><path d="M3 3s2.93 6 8 9c5.07 3 10-3 10-3"/></svg>
+              Orman Bölgesi Seçimi
+            </h2>
+            <p class="panel-desc">LST + NDVI verileriyle izlenen bölgelerden birini seçin</p>
+          </div>
+
+          <!-- Map Button - BIG CTA -->
+          <button class="open-map-btn-big" id="bio-open-map-btn" onclick="openMapModal('bio')" aria-label="Haritaı Aç">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+            <span>Türkiye Orman Haritası</span>
+            <span class="ombb-arrow">→</span>
+          </button>
+
+          <div class="forest-list" role="listbox" aria-label="Orman Bölgeleri">
+
+            <button class="forest-card" id="fc-kastamonu" onclick="selectForest('kastamonu')" role="option" aria-selected="false">
+              <div class="fc-color fc-color-kastamonu"></div>
+              <div class="fc-info">
+                <span class="fc-name">Kastamonu</span>
+                <span class="fc-region">Karadeniz Bölgesi</span>
+                <div class="fc-tags">
+                  <span class="tag tag-danger">Yüksek Risk</span>
+                  <span class="tag tag-area">562.000 ha</span>
+                </div>
+              </div>
+              <div class="fc-chevron">›</div>
+            </button>
+
+            <button class="forest-card" id="fc-antalya" onclick="selectForest('antalya')" role="option" aria-selected="false">
+              <div class="fc-color fc-color-antalya"></div>
+              <div class="fc-info">
+                <span class="fc-name">Antalya</span>
+                <span class="fc-region">Akdeniz Bölgesi</span>
+                <div class="fc-tags">
+                  <span class="tag tag-critical">Kritik</span>
+                  <span class="tag tag-area">1.200.000 ha</span>
+                </div>
+              </div>
+              <div class="fc-chevron">›</div>
+            </button>
+
+            <button class="forest-card" id="fc-mugla" onclick="selectForest('mugla')" role="option" aria-selected="false">
+              <div class="fc-color fc-color-mugla"></div>
+              <div class="fc-info">
+                <span class="fc-name">Muğla</span>
+                <span class="fc-region">Ege Bölgesi</span>
+                <div class="fc-tags">
+                  <span class="tag tag-critical">Kritik</span>
+                  <span class="tag tag-area">870.000 ha</span>
+                </div>
+              </div>
+              <div class="fc-chevron">›</div>
+            </button>
+
+            <button class="forest-card" id="fc-bolu" onclick="selectForest('bolu')" role="option" aria-selected="false">
+              <div class="fc-color fc-color-bolu"></div>
+              <div class="fc-info">
+                <span class="fc-name">Bolu</span>
+                <span class="fc-region">Batı Karadeniz</span>
+                <div class="fc-tags">
+                  <span class="tag tag-warning">Orta Risk</span>
+                  <span class="tag tag-area">430.000 ha</span>
+                </div>
+              </div>
+              <div class="fc-chevron">›</div>
+            </button>
+
+            <button class="forest-card" id="fc-canakkale" onclick="selectForest('canakkale')" role="option" aria-selected="false">
+              <div class="fc-color fc-color-canakkale"></div>
+              <div class="fc-info">
+                <span class="fc-name">Çanakkale</span>
+                <span class="fc-region">Marmara Bölgesi</span>
+                <div class="fc-tags">
+                  <span class="tag tag-warning">Orta Risk</span>
+                  <span class="tag tag-area">290.000 ha</span>
+                </div>
+              </div>
+              <div class="fc-chevron">›</div>
+            </button>
+
+          </div>
+
+          <!-- Map Button -->
+          <div class="panel-map-btn-wrap">
+            <button class="open-map-btn" id="bio-open-map-btn" onclick="openMapModal('bio')" aria-label="Haritayı Aç">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+              Haritada Gör
+            </button>
+          </div>
+        </aside>
+
+        <!-- RIGHT: Stats Panel -->
+        <aside class="right-panel" id="stats-panel">
+          <div id="stats-placeholder" class="stats-ph">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.3;color:#8fafc8;margin-bottom:12px;"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 12h6M9 15h4"/></svg>
+            <p class="sph-title">İstatistik Paneli</p>
+            <p class="sph-sub">Bir orman bölgesi seçildikten sonra NDVI değişimi ve biyoçeşitlilik analizi burada görünecek</p>
+          </div>
+          <div id="stats-content" class="stats-content hidden"></div>
+        </aside>
+
+      </div>
+    </section>
+
+    <!-- ======== FLORA + FAUNA MODULE ======== -->
+    <section id="module-flora" class="module hidden">
+      <div class="flora-fauna-layout">
+
+        <!-- TOP HERO -->
+        <div class="ff-hero">
+          <div class="ff-hero-left">
+            <div class="ff-hero-icon-wrap">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#00e676" stroke-width="1.5"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 12V2"/><path d="M12 12l6.5-6.5"/></svg>
+            </div>
+            <div>
+              <h1 class="ff-hero-title">Flora &amp; Fauna İzleme</h1>
+              <p class="ff-hero-sub">NDVI tabanlı bitki örtüsü + risk altındaki türler — 5 bölge gerçek zamanlı</p>
+            </div>
+          </div>
+          <div class="ff-global-stats">
+            <div class="ff-gs-item">
+              <span class="ff-gs-val">78.4%</span>
+              <span class="ff-gs-lbl">Ort. NDVI</span>
+            </div>
+            <div class="ff-gs-sep"></div>
+            <div class="ff-gs-item">
+              <span class="ff-gs-val" style="color:#fb923c;">10.317</span>
+              <span class="ff-gs-lbl">Etkilenen Fauna</span>
+            </div>
+            <div class="ff-gs-sep"></div>
+            <div class="ff-gs-item">
+              <span class="ff-gs-val" style="color:#f87171;">342</span>
+              <span class="ff-gs-lbl">Endemik Bitki Riski</span>
+            </div>
+            <div class="ff-gs-sep"></div>
+            <div class="ff-gs-item">
+              <span class="ff-gs-val" style="color:#a78bfa;">322</span>
+              <span class="ff-gs-lbl">Risk Altındaki Hayvan</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- REGION SELECTOR TABS -->
+        <div class="ff-region-tabs" id="ff-region-tabs">
+          <button class="ff-tab active" onclick="selectFloraRegion('kastamonu')" id="fftab-kastamonu">
+            <span class="ff-tab-dot" style="background:#3b82f6"></span>Kastamonu
+          </button>
+          <button class="ff-tab" onclick="selectFloraRegion('antalya')" id="fftab-antalya">
+            <span class="ff-tab-dot" style="background:#ef4444"></span>Antalya
+          </button>
+          <button class="ff-tab" onclick="selectFloraRegion('mugla')" id="fftab-mugla">
+            <span class="ff-tab-dot" style="background:#a855f7"></span>Muğla
+          </button>
+          <button class="ff-tab" onclick="selectFloraRegion('bolu')" id="fftab-bolu">
+            <span class="ff-tab-dot" style="background:#22c55e"></span>Bolu
+          </button>
+          <button class="ff-tab" onclick="selectFloraRegion('canakkale')" id="fftab-canakkale">
+            <span class="ff-tab-dot" style="background:#eab308"></span>Çanakkale
+          </button>
+        </div>
+
+        <!-- CONTENT GRID -->
+        <div class="ff-content-grid" id="ff-content-grid">
+          <!-- rendered by JS -->
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ======== FIRE SPREAD MODULE ======== -->
+    <section id="module-fire" class="module hidden">
+      <div class="module-layout-nomap">
+        <!-- LEFT: Forest List -->
+        <aside class="left-panel" id="fire-forest-panel">
+          <div class="panel-header">
+            <h2 class="panel-title">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 8C8 10 5.9 16.17 3.82 21.34"/><path d="M11.63 12.27C6.18 14.54 4.43 19.1 3.96 21"/><path d="M3 3s2.93 6 8 9c5.07 3 10-3 10-3"/></svg>
+              Yangın Risk Bölgesi
+            </h2>
+            <p class="panel-desc">Meteoroloji + rüzgar yönü ile yangın yayılım tahmini</p>
+          </div>
+
+          <!-- Fire Map Button - BIG CTA -->
+          <button class="open-map-btn-big open-map-btn-big-fire" id="fire-open-map-btn" onclick="openMapModal('fire')" aria-label="Yangın Haritasını Aç">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2c-2 4-4 6-4 10a6 6 0 0 0 12 0c0-4-2-6-4-10"/><path d="M12 12c-1 2-2 3-2 5a2 2 0 0 0 4 0c0-2-1-3-2-5"/></svg>
+            <span>Yangın Yayılım Haritası</span>
+            <span class="ombb-arrow">→</span>
+          </button>
+
+          <div class="forest-list" role="listbox" aria-label="Orman Bölgeleri">
+            <button class="forest-card" id="ffc-kastamonu" onclick="selectFireForest('kastamonu')" role="option" aria-selected="false">
+              <div class="fc-color fc-color-kastamonu"></div>
+              <div class="fc-info"><span class="fc-name">Kastamonu</span><span class="fc-region">Karadeniz Bölgesi</span></div>
+              <div class="fc-chevron">›</div>
+            </button>
+            <button class="forest-card" id="ffc-antalya" onclick="selectFireForest('antalya')" role="option" aria-selected="false">
+              <div class="fc-color fc-color-antalya"></div>
+              <div class="fc-info"><span class="fc-name">Antalya</span><span class="fc-region">Akdeniz Bölgesi</span></div>
+              <div class="fc-chevron">›</div>
+            </button>
+            <button class="forest-card" id="ffc-mugla" onclick="selectFireForest('mugla')" role="option" aria-selected="false">
+              <div class="fc-color fc-color-mugla"></div>
+              <div class="fc-info"><span class="fc-name">Muğla</span><span class="fc-region">Ege Bölgesi</span></div>
+              <div class="fc-chevron">›</div>
+            </button>
+            <button class="forest-card" id="ffc-bolu" onclick="selectFireForest('bolu')" role="option" aria-selected="false">
+              <div class="fc-color fc-color-bolu"></div>
+              <div class="fc-info"><span class="fc-name">Bolu</span><span class="fc-region">Batı Karadeniz</span></div>
+              <div class="fc-chevron">›</div>
+            </button>
+            <button class="forest-card" id="ffc-canakkale" onclick="selectFireForest('canakkale')" role="option" aria-selected="false">
+              <div class="fc-color fc-color-canakkale"></div>
+              <div class="fc-info"><span class="fc-name">Çanakkale</span><span class="fc-region">Marmara Bölgesi</span></div>
+              <div class="fc-chevron">›</div>
+            </button>
+          </div>
+
+        </aside>
+
+        <!-- RIGHT: Stats Panel -->
+        <aside class="right-panel" id="fire-stats-panel">
+          <div id="fire-stats-placeholder" class="stats-ph">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.3;color:#8fafc8;margin-bottom:12px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M12 8v4l3 3"/></svg>
+            <p class="sph-title">Meteoroloji ve Yayılım</p>
+            <p class="sph-sub">Bir bölge seçtiğinizde anlık hava durumu ve simüle edilmiş yangın yayılım tahmini burada görünecek</p>
+          </div>
+          <div id="fire-stats-content" class="stats-content hidden"></div>
+        </aside>
+
+      </div>
+    </section>
+
+    <!-- ======== DROUGHT EARLY WARNING MODULE ======== -->
+    <section id="module-drought" class="module hidden">
+      <div class="drought-layout">
+
+        <!-- TOP STRIP: Alert Banner -->
+        <div class="drought-alert-strip" id="drought-alert-strip">
+          <div class="das-pulse"></div>
+          <div class="das-text">
+            <strong>KURAKLIK ERKEN UYARI SİSTEMİ</strong>
+            <span>— NDVI indeksindeki istatistiksel düşüşler gerçek zamanlı izleniyor</span>
+          </div>
+          <div class="das-status" id="drought-system-status">
+            <span class="das-dot active-dot"></span> SİSTEM AKTİF
+          </div>
+        </div>
+
+        <div class="drought-main-grid">
+
+          <!-- LEFT: Region List -->
+          <aside class="drought-left">
+            <div class="drought-left-header">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              Bölge Seçin
+            </div>
+
+            <!-- Drought Map Button - BIG CTA -->
+            <button class="open-map-btn-big open-map-btn-big-drought" onclick="openMapModal('drought')" aria-label="NDVI Haritasını Aç">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              <span>NDVI Kuraklık Haritası</span>
+              <span class="ombb-arrow">→</span>
+            </button>
+
+            <div class="drought-region-list">
+              <button class="drought-region-card" id="drc-kastamonu" onclick="selectDroughtRegion('kastamonu')">
+                <div class="drc-left">
+                  <div class="drc-dot" style="background:#3b82f6"></div>
+                  <div>
+                    <div class="drc-name">Kastamonu</div>
+                    <div class="drc-region">Karadeniz</div>
+                  </div>
+                </div>
+                <div class="drc-ndvi ndvi-ok" id="drc-ndvi-kastamonu">NDVI 0.71</div>
+              </button>
+
+              <button class="drought-region-card" id="drc-antalya" onclick="selectDroughtRegion('antalya')">
+                <div class="drc-left">
+                  <div class="drc-dot" style="background:#ef4444"></div>
+                  <div>
+                    <div class="drc-name">Antalya</div>
+                    <div class="drc-region">Akdeniz</div>
+                  </div>
+                </div>
+                <div class="drc-ndvi ndvi-critical" id="drc-ndvi-antalya">NDVI 0.43</div>
+              </button>
+
+              <button class="drought-region-card" id="drc-mugla" onclick="selectDroughtRegion('mugla')">
+                <div class="drc-left">
+                  <div class="drc-dot" style="background:#a855f7"></div>
+                  <div>
+                    <div class="drc-name">Muğla</div>
+                    <div class="drc-region">Ege</div>
+                  </div>
+                </div>
+                <div class="drc-ndvi ndvi-critical" id="drc-ndvi-mugla">NDVI 0.38</div>
+              </button>
+
+              <button class="drought-region-card" id="drc-bolu" onclick="selectDroughtRegion('bolu')">
+                <div class="drc-left">
+                  <div class="drc-dot" style="background:#22c55e"></div>
+                  <div>
+                    <div class="drc-name">Bolu</div>
+                    <div class="drc-region">Karadeniz</div>
+                  </div>
+                </div>
+                <div class="drc-ndvi ndvi-ok" id="drc-ndvi-bolu">NDVI 0.82</div>
+              </button>
+
+              <button class="drought-region-card" id="drc-canakkale" onclick="selectDroughtRegion('canakkale')">
+                <div class="drc-left">
+                  <div class="drc-dot" style="background:#eab308"></div>
+                  <div>
+                    <div class="drc-name">Çanakkale</div>
+                    <div class="drc-region">Marmara</div>
+                  </div>
+                </div>
+                <div class="drc-ndvi ndvi-mid" id="drc-ndvi-canakkale">NDVI 0.56</div>
+              </button>
+            </div>
+
+          </aside>
+
+          <!-- CENTER: NDVI Chart + details -->
+          <div class="drought-center" id="drought-center">
+            <div class="drought-select-hint" id="drought-hint">
+              <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="1.2" opacity="0.4"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+              <p>Sol panelden bir bölge seçin</p>
+              <p style="font-size:0.7rem;color:#475569">Zamansal NDVI değişimi ve kuraklık eşiği analizi görüntülenecek</p>
+            </div>
+            <div id="drought-detail" class="drought-detail hidden"></div>
+          </div>
+
+          <!-- RIGHT: Alert Log -->
+          <aside class="drought-right">
+            <div class="drought-alerts-header">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              Uyarı Günlüğü
+            </div>
+            <div class="drought-alert-log" id="drought-alert-log">
+              <!-- populated by JS -->
+            </div>
+          </aside>
+
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ============ FOOTER ============ -->
+  <footer id="main-footer">
+    <span>Gökmen-M CubeSat Platform &copy; 2026 &mdash; NDVI + LST Sensör Füzyonu</span>
+    <span class="footer-sep">|</span>
+    <span>Veri Kaynakları: Sentinel-2, MODIS, TÜBİTAK UZAY</span>
+  </footer>
+
+  <!-- App Scripts -->
+  <script src="js/data.js?v=5"></script>
+  <script src="js/map.js?v=5"></script>
+  <script src="js/stats.js?v=5"></script>
+  <script src="js/fire.js?v=5"></script>
+  <script src="js/flora_fauna.js?v=5"></script>
+  <script src="js/drought.js?v=5"></script>
+  <script src="js/app.js?v=5"></script>
+</body>
+</html>
